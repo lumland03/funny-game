@@ -11,7 +11,6 @@ function createDeck() {
     const suits = ['Hearts', 'Diamonds', 'Clubs', 'Spades'];
     const values = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
     let newDeck = [];
-
     for (let suit of suits) {
         for (let value of values) {
             newDeck.push({ suit, value });
@@ -31,7 +30,6 @@ function shuffle(array) {
 function calculateScore(hand) {
     let score = 0;
     let aces = 0;
-
     hand.forEach(card => {
         if (card.value === 'A') {
             aces += 1;
@@ -42,7 +40,6 @@ function calculateScore(hand) {
             score += parseInt(card.value);
         }
     });
-
     while (score > 21 && aces > 0) {
         score -= 10;
         aces -= 1;
@@ -50,43 +47,65 @@ function calculateScore(hand) {
     return score;
 }
 
-// Initialize the master deck
-let gameDeck = shuffle(createDeck());
-
 // --- COMMUNICATION LOGIC ---
 
 io.on('connection', (socket) => {
     console.log('A player joined:', socket.id);
 
-    // Keep track of this specific player's hands
+    // FIX: Scoped per player so games don't mix up
+    let gameDeck = shuffle(createDeck());
     let playerHand = [];
     let dealerHand = [];
+    let gameInProgress = false;
 
-    // 1. START GAME: Resets and deals initial 4 cards
     socket.on('startGame', () => {
-        // Reshuffle if deck is low
-        if (gameDeck.length < 20) gameDeck = shuffle(createDeck());
+        // Guard: Refresh deck if low
+        if (gameDeck.length < 10) gameDeck = shuffle(createDeck());
 
         playerHand = [gameDeck.pop(), gameDeck.pop()];
         dealerHand = [gameDeck.pop(), gameDeck.pop()];
+        gameInProgress = true;
+
+        const playerScore = calculateScore(playerHand);
+        const isBlackjack = playerScore === 21;
+        
+        let finalDealerHand = null;
+        let finalDealerScore = null;
+
+        // FIX: Immediate dealer resolution for Blackjack
+        if (isBlackjack) {
+            gameInProgress = false; // Game ends immediately
+            let dScore = calculateScore(dealerHand);
+            while (dScore < 17) {
+                // Guard: Deck check inside loop
+                if (gameDeck.length < 1) gameDeck = shuffle(createDeck());
+                dealerHand.push(gameDeck.pop());
+                dScore = calculateScore(dealerHand);
+            }
+            finalDealerHand = dealerHand;
+            finalDealerScore = dScore;
+        }
 
         socket.emit('gameState', {
             playerHand: playerHand,
-            playerScore: calculateScore(playerHand),
-            dealerUpCard: dealerHand[0], 
-            cardsRemaining: gameDeck.length
+            playerScore: playerScore,
+            dealerUpCard: dealerHand[0],
+            isBlackjack: isBlackjack,
+            fullDealerHand: finalDealerHand,
+            dealerScore: finalDealerScore
         });
     });
 
-    // 2. HIT: Deals one card to the player
     socket.on('requestCard', () => {
-        console.log("SERVER: Hit button was pressed!");
-        if (gameDeck.length < 2) gameDeck = shuffle(createDeck());
+        if (!gameInProgress) return;
+        if (calculateScore(playerHand) >= 21) return;
 
+        if (gameDeck.length < 2) gameDeck = shuffle(createDeck());
         const card = gameDeck.pop();
         playerHand.push(card);
         
         const total = calculateScore(playerHand);
+        if (total >= 21) gameInProgress = false; // Auto-stop if 21 or bust
 
         socket.emit('receiveCard', {
             card: card,
@@ -96,39 +115,32 @@ io.on('connection', (socket) => {
     });
 
     socket.on('stay', () => {
-        console.log("SERVER: Stay button was pressed!");
-        let dealerScore = calculateScore(dealerHand);
+        if (!gameInProgress) return;
+        gameInProgress = false;
 
-        // Dealer must hit until they reach 17
-        while (dealerScore < 17) {
+        let dScore = calculateScore(dealerHand);
+        while (dScore < 17) {
+            if (gameDeck.length < 1) gameDeck = shuffle(createDeck());
             dealerHand.push(gameDeck.pop());
-            dealerScore = calculateScore(dealerHand);
+            dScore = calculateScore(dealerHand);
         }
 
-        const playerScore = calculateScore(playerHand);
+        const pScore = calculateScore(playerHand);
         let result = '';
+        if (dScore > 21) result = 'Dealer Busted! YOU WIN!';
+        else if (dScore > pScore) result = 'Dealer Wins!';
+        else if (dScore < pScore) result = 'YOU WIN!';
+        else result = 'Push (Tie)!';
 
-        // Determine Winner
-        if (dealerScore > 21) {
-            result = 'Dealer Busted! YOU WIN!';
-        } else if (dealerScore > playerScore) {
-            result = 'Dealer Wins!';
-        } else if (dealerScore < playerScore) {
-            result = 'YOU WIN!';
-        } else {
-            result = 'Push (Tie)!';
-        }
-
-        // Send everything back to the client
         socket.emit('dealerTurn', {
             fullDealerHand: dealerHand,
-            dealerScore: dealerScore,
+            dealerScore: dScore,
             result: result
         });
     });
 
     socket.on('disconnect', () => {
-        console.log('Player disconnected');
+        console.log('Player disconnected:', socket.id);
     });
 });
 

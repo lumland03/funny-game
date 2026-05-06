@@ -11,36 +11,23 @@ const config = {
 const game = new Phaser.Game(config);
 
 function preload() {
-    // Face cards atlas
     this.load.atlasXML('cardDeck', 'assets/playingCards.png', 'assets/playingCards.xml');
-    // Back cards atlas - Make sure these files exist!
     this.load.atlasXML('cardBacks', 'assets/playingCardBacks.png', 'assets/playingCardBacks.xml');
 }
 
 function create() {
     this.socket = io();
     
-    // Clean up old listeners to prevent memory leaks
-    this.socket.off('gameState');
-    this.socket.off('receiveCard');
-    this.socket.off('dealerTurn');
-
     this.playerSprites = [];
     this.dealerSprites = [];
     this.playerCardCount = 0;
+    this.playerScore = 0; 
     this.isRoundActive = false; 
 
-    // UI Elements stored on 'this'
     this.scoreText = this.add.text(400, 560, 'Score: 0', { fontSize: '20px', fill: '#fff' }).setOrigin(0.5);
-
-    this.startButton = this.add.text(400, 300, 'START GAME', { fontSize: '32px', fill: '#0f0', backgroundColor: '#000', padding: 10 })
-        .setOrigin(0.5).setInteractive();
-
-    this.hitButton = this.add.text(300, 500, 'HIT', { fontSize: '24px', fill: '#fff', backgroundColor: '#333', padding: 10 })
-        .setOrigin(0.5).setInteractive().setVisible(false);
-
-    this.stayButton = this.add.text(500, 500, 'STAY', { fontSize: '24px', fill: '#fff', backgroundColor: '#333', padding: 10 })
-        .setOrigin(0.5).setInteractive().setVisible(false);
+    this.startButton = this.add.text(400, 300, 'START GAME', { fontSize: '32px', fill: '#0f0', backgroundColor: '#000', padding: 10 }).setOrigin(0.5).setInteractive();
+    this.hitButton = this.add.text(300, 500, 'HIT', { fontSize: '24px', fill: '#fff', backgroundColor: '#333', padding: 10 }).setOrigin(0.5).setInteractive().setVisible(false);
+    this.stayButton = this.add.text(500, 500, 'STAY', { fontSize: '24px', fill: '#fff', backgroundColor: '#333', padding: 10 }).setOrigin(0.5).setInteractive().setVisible(false);
 
     // Button Logic
     this.startButton.on('pointerdown', () => {
@@ -48,7 +35,12 @@ function create() {
         this.startButton.setVisible(false);
     });
 
-    this.hitButton.on('pointerdown', () => { if(this.isRoundActive) this.socket.emit('requestCard'); });
+    this.hitButton.on('pointerdown', () => {
+        if (this.isRoundActive && this.playerScore < 21) {
+            this.socket.emit('requestCard');
+        }
+    });
+
     this.stayButton.on('pointerdown', () => {
         if(this.isRoundActive) {
             this.socket.emit('stay');
@@ -57,65 +49,82 @@ function create() {
         }
     });
 
-    // Listen for Game Start
+    this.socket.off('gameState');
+    this.socket.off('receiveCard');
+    this.socket.off('dealerTurn');
+
+    // --- 1. GAME STATE HANDLER ---
     this.socket.on('gameState', (data) => {
         this.playerSprites.forEach(s => s.destroy());
         this.dealerSprites.forEach(s => s.destroy());
         this.playerSprites = [];
         this.dealerSprites = [];
         this.playerCardCount = 0;
+        this.playerScore = data.playerScore;
 
-        // Check for Blackjack immediately
-        if (data.isBlackjack) {
-            this.isRoundActive = false;
-            this.scoreText.setText(`Score: 21 - BLACKJACK!`);
-            this.time.delayedCall(1000, () => {
-                this.add.text(400, 300, 'BLACKJACK!', { fontSize: '48px', fill: '#ff0', backgroundColor: '#000', padding: 20 }).setOrigin(0.5);
-                this.hitButton.setVisible(false);
-                this.stayButton.setVisible(false);
-                this.startButton.setText('PLAY AGAIN').setVisible(true);
-            });
-        } else {
-            this.isRoundActive = true;
-            this.hitButton.setVisible(true);
-            this.stayButton.setVisible(true);
-            this.scoreText.setText(`Score: ${data.playerScore}`);
-        }
-
-        // Draw Player Hand (from cardDeck atlas)
+        // Draw Player Cards
         data.playerHand.forEach((card, index) => {
             const sprite = this.add.image(300 + (index * 70), 400, 'cardDeck', `card${card.suit}${card.value}.png`).setScale(0.7);
             this.playerSprites.push(sprite);
             this.playerCardCount++;
         });
 
-        // Dealer Up-Card (from cardDeck atlas)
-        this.dealerSprites.push(this.add.image(300, 150, 'cardDeck', `card${data.dealerUpCard.suit}${data.dealerUpCard.value}.png`).setScale(0.7));
-
-        // Dealer Back-Card (from cardBacks atlas)
-        const hiddenCard = this.add.image(370, 150, 'cardBacks', 'cardBack_red2.png').setScale(0.7);
-        this.dealerSprites.push(hiddenCard);
-    });
-
-    // Listen for Hits
-    this.socket.on('receiveCard', (data) => {
-        if (!this.isRoundActive) return;
-
-        const sprite = this.add.image(300 + (this.playerCardCount * 70), 400, 'cardDeck', `card${data.card.suit}${data.card.value}.png`).setScale(0.7);
-        this.playerSprites.push(sprite);
-        this.playerCardCount++;
-        this.scoreText.setText(`Score: ${data.score}`);
-
-        if (data.isBust) {
+        if (data.isBlackjack) {
             this.isRoundActive = false;
-            this.scoreText.setText(`Score: ${data.score} - BUSTED!`);
             this.hitButton.setVisible(false);
             this.stayButton.setVisible(false);
-            this.time.delayedCall(1500, () => this.startButton.setText('TRY AGAIN?').setVisible(true));
+
+            // REVEAL DEALER CARDS (Using the data we added to server.js)
+            data.fullDealerHand.forEach((card, index) => {
+                const sprite = this.add.image(300 + (index * 70), 150, 'cardDeck', `card${card.suit}${card.value}.png`).setScale(0.7);
+                this.dealerSprites.push(sprite);
+            });
+
+            this.scoreText.setText(`Score: 21 - BLACKJACK!`);
+            const bjText = this.add.text(400, 300, 'BLACKJACK!', { fontSize: '48px', fill: '#ff0', backgroundColor: '#000', padding: 20 }).setOrigin(0.5);
+            
+            this.time.delayedCall(3000, () => {
+                bjText.destroy();
+                this.startButton.setText('PLAY AGAIN').setVisible(true);
+            });
+        } else {
+            this.isRoundActive = true;
+            this.hitButton.setVisible(true);
+            this.stayButton.setVisible(true);
+            this.scoreText.setText(`Score: ${this.playerScore}`);
+
+            // Standard hidden card setup
+            this.dealerSprites.push(this.add.image(300, 150, 'cardDeck', `card${data.dealerUpCard.suit}${data.dealerUpCard.value}.png`).setScale(0.7));
+            this.dealerSprites.push(this.add.image(370, 150, 'cardBacks', 'cardBack_red2.png').setScale(0.7));
         }
     });
 
-    // Listen for Dealer Turn
+    // --- 2. RECEIVE CARD HANDLER ---
+    this.socket.on('receiveCard', (data) => {
+        if (!this.isRoundActive) return;
+
+        this.playerScore = data.score;
+        const sprite = this.add.image(300 + (this.playerCardCount * 70), 400, 'cardDeck', `card${data.card.suit}${data.card.value}.png`).setScale(0.7);
+        this.playerSprites.push(sprite);
+        this.playerCardCount++;
+        this.scoreText.setText(`Score: ${this.playerScore}`);
+
+        if (data.isBust) {
+            this.isRoundActive = false;
+            this.scoreText.setText(`Score: ${this.playerScore} - BUSTED!`);
+            this.hitButton.setVisible(false);
+            this.stayButton.setVisible(false);
+            this.time.delayedCall(1500, () => this.startButton.setText('TRY AGAIN?').setVisible(true));
+        } else if (this.playerScore === 21) {
+            this.hitButton.setVisible(false);
+            this.stayButton.setVisible(false); 
+            this.time.delayedCall(500, () => {
+                if (this.isRoundActive) this.socket.emit('stay');
+            });
+        }
+    });
+
+    // --- 3. DEALER TURN HANDLER ---
     this.socket.on('dealerTurn', (data) => {
         this.isRoundActive = false;
         this.dealerSprites.forEach(s => s.destroy());
