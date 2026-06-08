@@ -124,7 +124,7 @@ function setupSinglePlayerLogic(socket) {
         playerHand.push(card);
         
         const total = calculateScore(playerHand);
-        if (total >= 21) gameInProgress = false; 
+        if (total > 21) gameInProgress = false; 
 
         socket.emit('receiveCard', {
             card: card,
@@ -243,9 +243,8 @@ function setupMultiplayerLogic(socket) {
             }
         }
     });
-}
 
-// --- PLAYER READY HANDLER ---
+    // --- PLAYER READY HANDLER ---
     socket.on('playerReady', () => {
         if (!currentRoomName || !rooms[currentRoomName]) return;
         
@@ -271,7 +270,7 @@ function setupMultiplayerLogic(socket) {
 
             // Deal 2 cards to every player in the room
             room.players.forEach(p => {
-                p.hand = [room.deck.pop(), p.deck ? p.deck.pop() : room.deck.pop()]; 
+                p.hand = p.hand = [room.deck.pop(), room.deck.pop()];
                 p.score = calculateScore(p.hand);
                 p.status = 'playing';
             });
@@ -291,6 +290,8 @@ function setupMultiplayerLogic(socket) {
             });
         }
     });
+}
+
 const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => {
     console.log(`Server is live at http://localhost:${PORT}`);

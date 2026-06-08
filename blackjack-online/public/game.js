@@ -61,7 +61,13 @@ class SinglePlayerScene extends Phaser.Scene {
 
         this.hitButton.on('pointerdown', () => {
             if (this.isRoundActive && this.playerScore < 21) {
-                this.socket.emit('requestCard');
+                this.socket.emit('requestCard');} else if (this.playerScore === 21) {
+                this.hitButton.setVisible(false);  // ✅ Add this
+                this.stayButton.setVisible(false); // ✅ Already there — just move it before the delayedCall
+                this.time.delayedCall(500, () => {
+            if (this.isRoundActive) this.socket.emit('stay');
+    });
+}
             }
         });
 
