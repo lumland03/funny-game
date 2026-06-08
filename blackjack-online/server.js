@@ -55,6 +55,15 @@ io.on('connection', (socket) => {
     console.log('A player joined the server:', socket.id);
 
     socket.on('modeSelection', (mode) => {
+        // 🔧 FIX: Prevent Memory Leaks & Duplicate Event Listeners
+        // Strip all game-specific listeners before switching modes
+        const gameEvents = [
+            'startGame', 'requestCard', 'stay', 
+            'joinRoom', 'playerReady', 'playerHit', 
+            'playerStay', 'getRoomStatus', 'leaveRoom'
+        ];
+        gameEvents.forEach(event => socket.removeAllListeners(event));
+
         if (mode === 'single') {
             setupSinglePlayerLogic(socket);
         } else if (mode === 'multi') {
@@ -68,7 +77,7 @@ io.on('connection', (socket) => {
 });
 
 // ==========================================
-// SINGLE PLAYER WRAPPER (Your Working Logic)
+// SINGLE PLAYER WRAPPER
 // ==========================================
 function setupSinglePlayerLogic(socket) {
     console.log(`[Mode] Socket ${socket.id} is playing Solo.`);
@@ -166,55 +175,50 @@ function setupSinglePlayerLogic(socket) {
 function setupMultiplayerLogic(socket) {
     console.log(`[Mode] Socket ${socket.id} entered the Multiplayer Pool.`);
     
-    // Track what room this specific socket eventually joins
     let currentRoomName = null;
 
     socket.on('joinRoom', (roomName) => {
-        // Clean up the string just in case
         const room = roomName.trim();
         if (!room) return;
 
         currentRoomName = room;
-        socket.join(room); // Socket.io built-in room clustering
+        socket.join(room);
 
-        // 1. If the room doesn't exist yet, initialize it
         if (!rooms[room]) {
             rooms[room] = {
                 deck: shuffle(createDeck()),
-                players: [],       // Array to hold player objects
+                players: [], 
                 dealerHand: [],
-                status: 'waiting', // 'waiting', 'playing', 'resolved'
-                currentTurn: 0     // Index tracking whose turn it is
+                status: 'waiting',
+                currentTurn: 0 
             };
             console.log(`[Multiplayer] Room Created: ${room}`);
         }
 
-        // 2. Prevent joining if a game is already in progress
         if (rooms[room].status !== 'waiting') {
             socket.emit('roomError', 'Game already in progress in this room.');
             socket.leave(room);
+            currentRoomName = null;
             return;
         }
 
-        // 3. Prevent room overcrowding (cap at 4 players)
         if (rooms[room].players.length >= 4) {
             socket.emit('roomError', 'Room is full! Maximum 4 players.');
             socket.leave(room);
+            currentRoomName = null;
             return;
         }
 
-        // 4. Add the player to the room's data structure
         rooms[room].players.push({
             id: socket.id,
             hand: [],
             score: 0,
             isReady: false,
-            status: 'waiting' // 'waiting', 'playing', 'stayed', 'busted'
+            status: 'waiting'
         });
 
         console.log(`[Multiplayer] Player ${socket.id} joined Room: ${room}`);
 
-        // 5. Broadcast the updated room state
         io.to(room).emit('roomUpdate', {
             roomName: room,
             players: rooms[room].players,
@@ -222,45 +226,45 @@ function setupMultiplayerLogic(socket) {
         });
     });
 
-    // --- PLAYER READY HANDLER ---
     socket.on('playerReady', () => {
         if (!currentRoomName || !rooms[currentRoomName]) return;
         
         const room = rooms[currentRoomName];
-        
-        // Find the player and flip their ready status
         const player = room.players.find(p => p.id === socket.id);
         if (player) {
             player.isReady = !player.isReady;
-            console.log(`[Multiplayer] Player ${socket.id} set ready to: ${player.isReady}`);
         }
 
-        // Check if EVERYONE is ready (min 2 players required)
         const allReady = room.players.length >= 2 && room.players.every(p => p.isReady);
 
         if (allReady) {
-            // Change room status so no one else can join mid-game
             room.status = 'playing';
             room.currentTurn = 0;
-            room.deck = shuffle(createDeck());
+            
+            // 🔧 FIX: Preserve shoe! Only reshuffle if running low on cards
+            if (room.deck.length < 25) room.deck = shuffle(createDeck());
+            
             room.dealerHand = [room.deck.pop(), room.deck.pop()];
 
-            // Deal 2 cards to every player
             room.players.forEach(p => {
                 p.hand = [room.deck.pop(), room.deck.pop()];
                 p.score = calculateScore(p.hand);
-                p.status = 'playing';
+                
+                // 🔧 FIX: Handle natural Blackjacks automatically
+                p.status = (p.score === 21) ? 'stayed' : 'playing';
             });
 
-            // Start the game
+            // Make sure we skip the turn of anyone who automatically got blackjack
+            advanceTurnIfNeeded(currentRoomName);
+
             io.to(currentRoomName).emit('multiGameState', {
                 players: room.players,
                 dealerUpCard: room.dealerHand[0],
                 dealerHand: room.dealerHand,
-                currentTurnId: room.players[0].id
+                // Ensure we send the ID of whoever's actual turn it is now
+                currentTurnId: room.players[room.currentTurn] ? room.players[room.currentTurn].id : null
             });
         } else {
-            // Broadcast updated room state
             io.to(currentRoomName).emit('roomUpdate', {
                 roomName: currentRoomName,
                 players: room.players,
@@ -269,7 +273,6 @@ function setupMultiplayerLogic(socket) {
         }
     });
 
-    // --- PLAYER HIT HANDLER ---
     socket.on('playerHit', () => {
         if (!currentRoomName || !rooms[currentRoomName]) return;
         const room = rooms[currentRoomName];
@@ -277,6 +280,9 @@ function setupMultiplayerLogic(socket) {
         
         if (!player || player.status !== 'playing') return;
         
+        // 🔧 FIX: Enforce Turns
+        if (room.players[room.currentTurn].id !== socket.id) return; 
+
         if (room.deck.length < 1) room.deck = shuffle(createDeck());
         const card = room.deck.pop();
         player.hand.push(card);
@@ -284,41 +290,45 @@ function setupMultiplayerLogic(socket) {
         
         if (player.score > 21) {
             player.status = 'busted';
+            io.to(currentRoomName).emit('playerUpdate', {
+                playerId: socket.id,
+                hand: player.hand,
+                score: player.score,
+                status: player.status
+            });
+            // Auto advance turn if busted
+            advanceTurn(currentRoomName);
+        } else {
+            io.to(currentRoomName).emit('playerUpdate', {
+                playerId: socket.id,
+                hand: player.hand,
+                score: player.score,
+                status: player.status
+            });
         }
-        
-        // Notify the room of the update
-        io.to(currentRoomName).emit('playerUpdate', {
-            playerId: socket.id,
-            hand: player.hand,
-            score: player.score,
-            status: player.status
-        });
-        
-        // Check if all players have finished
-        checkGameEnd(currentRoomName);
     });
 
-    // --- PLAYER STAY HANDLER ---
     socket.on('playerStay', () => {
         if (!currentRoomName || !rooms[currentRoomName]) return;
         const room = rooms[currentRoomName];
         const player = room.players.find(p => p.id === socket.id);
         
         if (!player) return;
-        player.status = 'stayed';
         
+        // 🔧 FIX: Enforce Turns
+        if (room.players[room.currentTurn].id !== socket.id) return; 
+
+        player.status = 'stayed';
         io.to(currentRoomName).emit('playerUpdate', {
             playerId: socket.id,
             status: 'stayed'
         });
         
-        checkGameEnd(currentRoomName);
+        advanceTurn(currentRoomName);
     });
 
-    // ✅ NEW: Get room status (for returning to lobby)
     socket.on('getRoomStatus', (roomName) => {
         if (!rooms[roomName]) return;
-        
         io.to(roomName).emit('roomUpdate', {
             roomName: roomName,
             players: rooms[roomName].players,
@@ -326,26 +336,70 @@ function setupMultiplayerLogic(socket) {
         });
     });
 
-    // ✅ NEW: Leave room gracefully
     socket.on('leaveRoom', () => {
-        if (currentRoomName && rooms[currentRoomName]) {
-            rooms[currentRoomName].players = rooms[currentRoomName].players.filter(p => p.id !== socket.id);
-            console.log(`[Multiplayer] Player ${socket.id} left Room: ${currentRoomName}`);
+        handlePlayerLeave(socket);
+    });
 
-            if (rooms[currentRoomName].players.length === 0) {
+    socket.on('disconnect', () => {
+        handlePlayerLeave(socket);
+    });
+
+    // --- HELPER: Turn Management ---
+    // 🔧 FIX: New function to manage multiplayer turns correctly
+    function advanceTurn(roomName) {
+        const room = rooms[roomName];
+        if (!room) return;
+        
+        room.currentTurn++;
+        advanceTurnIfNeeded(roomName);
+    }
+
+    function advanceTurnIfNeeded(roomName) {
+        const room = rooms[roomName];
+        if (!room) return;
+
+        if (room.currentTurn >= room.players.length) {
+            checkGameEnd(roomName);
+        } else {
+            const nextPlayer = room.players[room.currentTurn];
+            if (nextPlayer.status !== 'playing') {
+                advanceTurn(roomName); // Skip over players who busted or got blackjack
+            } else {
+                io.to(roomName).emit('turnChange', { currentTurnId: nextPlayer.id });
+            }
+        }
+    }
+
+    // --- HELPER: Disconnect / Leave Handling ---
+    function handlePlayerLeave(disconnectedSocket) {
+        if (currentRoomName && rooms[currentRoomName]) {
+            const room = rooms[currentRoomName];
+            room.players = room.players.filter(p => p.id !== disconnectedSocket.id);
+            console.log(`[Multiplayer] Player ${disconnectedSocket.id} left Room: ${currentRoomName}`);
+
+            if (room.players.length === 0) {
                 delete rooms[currentRoomName];
                 console.log(`[Multiplayer] Room ${currentRoomName} destroyed (Empty)`);
             } else {
                 io.to(currentRoomName).emit('roomUpdate', {
                     roomName: currentRoomName,
-                    players: rooms[currentRoomName].players,
-                    status: rooms[currentRoomName].status
+                    players: room.players,
+                    status: room.status
                 });
+
+                // 🔧 FIX: Prevent game hang if someone disconnects mid-game
+                if (room.status === 'playing') {
+                    // Check if the remaining players are already done
+                    const allFinished = room.players.every(p => p.status === 'stayed' || p.status === 'busted');
+                    if (allFinished) {
+                        checkGameEnd(currentRoomName);
+                    }
+                }
             }
-            socket.leave(currentRoomName);
+            disconnectedSocket.leave(currentRoomName);
             currentRoomName = null;
         }
-    });
+    }
 
     // --- HELPER: Check if game should end ---
     function checkGameEnd(roomName) {
@@ -355,7 +409,6 @@ function setupMultiplayerLogic(socket) {
         const allFinished = room.players.every(p => p.status === 'stayed' || p.status === 'busted');
         
         if (allFinished) {
-            // Dealer plays
             let dScore = calculateScore(room.dealerHand);
             while (dScore < 17) {
                 if (room.deck.length < 1) room.deck = shuffle(createDeck());
@@ -363,7 +416,6 @@ function setupMultiplayerLogic(socket) {
                 dScore = calculateScore(room.dealerHand);
             }
             
-            // Calculate results
             const results = room.players.map(p => {
                 let result = '';
                 if (p.status === 'busted') {
@@ -385,15 +437,13 @@ function setupMultiplayerLogic(socket) {
                 results: results
             });
 
-            // ✅ IMPROVED: Reset room for next round instead of destroying
             setTimeout(() => {
                 if (rooms[roomName]) {
                     console.log(`[Multiplayer] Resetting Room ${roomName} for next round`);
                     room.status = 'waiting';
                     room.dealerHand = [];
-                    room.deck = shuffle(createDeck());
+                    // 🔧 FIX: Do NOT recreate the deck completely here. Let it persist for the next round.
                     
-                    // Reset players for next round
                     room.players.forEach(p => {
                         p.hand = [];
                         p.score = 0;
@@ -404,26 +454,8 @@ function setupMultiplayerLogic(socket) {
             }, 3000);
         }
     }
-
-    // Handle sudden disconnects
-    socket.on('disconnect', () => {
-        if (currentRoomName && rooms[currentRoomName]) {
-            rooms[currentRoomName].players = rooms[currentRoomName].players.filter(p => p.id !== socket.id);
-            console.log(`[Multiplayer] Player ${socket.id} disconnected from Room: ${currentRoomName}`);
-
-            if (rooms[currentRoomName].players.length === 0) {
-                delete rooms[currentRoomName];
-                console.log(`[Multiplayer] Room ${currentRoomName} destroyed (Empty)`);
-            } else {
-                io.to(currentRoomName).emit('roomUpdate', {
-                    roomName: currentRoomName,
-                    players: rooms[currentRoomName].players,
-                    status: rooms[currentRoomName].status
-                });
-            }
-        }
-    });
 }
+
 const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => {
     console.log(`Server is live at http://localhost:${PORT}`);

@@ -1,4 +1,4 @@
-// ==========================================
+]// ==========================================
 // 0. GLOBAL NETWORK INITIALIZATION
 // ==========================================
 const socket = io();
@@ -189,9 +189,9 @@ class MultiplayerScene extends Phaser.Scene {
         this.currentRoom = null;
         this.myPlayerId = this.socket.id;
         this.gameActive = false;
-        this.playerCardSprites = {}; // Track card sprites by player ID
-        this.playerPositionMap = {}; // ✅ Map player ID to their layout position
-        this.gameContainer = null; // Will hold all game scene elements
+        this.playerCardSprites = {}; 
+        this.playerPositionMap = {}; 
+        this.gameContainer = null; 
 
         // UI Text Components
         this.statusText = this.add.text(400, 30, 'MULTIPLAYER LOBBY', { fontSize: '32px', fill: '#fff' }).setOrigin(0.5);
@@ -247,25 +247,21 @@ class MultiplayerScene extends Phaser.Scene {
             }
             this.gameContainer = this.add.container(0, 0);
 
-            // ✅ RENDER DEALER CARDS AT TOP
+            // 🔧 FIX: Render only the upcard and one face-down card
             const dealerLabel = this.add.text(400, 20, 'DEALER', { fontSize: '20px', fill: '#ff6b6b', fontStyle: 'bold' });
             dealerLabel.setOrigin(0.5);
             this.gameContainer.add(dealerLabel);
 
-            // Show dealer cards
             const dealerCardX = 320;
-            data.dealerHand.forEach((card, idx) => {
-                const sprite = this.add.image(
-                    dealerCardX + (idx * 90),
-                    80,
-                    'cardDeck',
-                    `card${card.suit}${card.value}.png`
-                ).setScale(0.8);
-                this.gameContainer.add(sprite);
-            });
+            // Show Up Card
+            const upCardSprite = this.add.image(dealerCardX, 80, 'cardDeck', `card${data.dealerUpCard.suit}${data.dealerUpCard.value}.png`).setScale(0.8);
+            // Show Hole Card (Face Down)
+            const holeCardSprite = this.add.image(dealerCardX + 90, 80, 'cardBacks', 'cardBack_red2.png').setScale(0.8);
+            holeCardSprite.setName('dealerHoleCard'); // Tag it so we can flip it later!
 
-            // ✅ IMPROVED LAYOUT: Better spacing to prevent overlap
-            // 2 players side-by-side on top, 2 on bottom
+            this.gameContainer.add([upCardSprite, holeCardSprite]);
+
+            // IMPROVED LAYOUT: Better spacing to prevent overlap
             const playerLayout = [
                 { x: 120, y: 220, label: 'Player 1' },
                 { x: 680, y: 220, label: 'Player 2' },
@@ -276,7 +272,7 @@ class MultiplayerScene extends Phaser.Scene {
             // Initialize card sprite tracking and position mapping for each player
             data.players.forEach((player, playerIdx) => {
                 this.playerCardSprites[player.id] = [];
-                this.playerPositionMap[player.id] = playerLayout[playerIdx]; // ✅ Store position mapping
+                this.playerPositionMap[player.id] = playerLayout[playerIdx]; 
                 
                 const pos = playerLayout[playerIdx];
                 const isYou = player.id === this.socket.id ? " (YOU)" : "";
@@ -307,16 +303,23 @@ class MultiplayerScene extends Phaser.Scene {
                 this.gameContainer.add(scoreText);
             });
 
-            // ✅ ADD HIT/STAY BUTTONS FOR CURRENT PLAYER
+            // 🔧 FIX: Start with buttons hidden, only show if it is YOUR turn
             this.hitButton = this.add.text(300, 550, 'HIT', { fontSize: '24px', fill: '#fff', backgroundColor: '#333', padding: 10 })
                 .setOrigin(0.5)
                 .setInteractive()
-                .setDepth(10);
+                .setDepth(10)
+                .setVisible(false);
 
             this.stayButton = this.add.text(500, 550, 'STAY', { fontSize: '24px', fill: '#fff', backgroundColor: '#333', padding: 10 })
                 .setOrigin(0.5)
                 .setInteractive()
-                .setDepth(10);
+                .setDepth(10)
+                .setVisible(false);
+
+            if (data.currentTurnId === this.socket.id) {
+                this.hitButton.setVisible(true);
+                this.stayButton.setVisible(true);
+            }
 
             this.hitButton.on('pointerdown', () => {
                 if (this.gameActive) {
@@ -335,7 +338,18 @@ class MultiplayerScene extends Phaser.Scene {
             console.log("Multiplayer Match Initialized:", data);
         });
 
-        // ✅ IMPROVED: Handle player updates with animated card drawing
+        // 🔧 FIX: Listen for turn changes to toggle UI buttons
+        this.socket.on('turnChange', (data) => {
+            console.log(`It is now player ${data.currentTurnId}'s turn.`);
+            if (data.currentTurnId === this.socket.id) {
+                this.hitButton.setVisible(true);
+                this.stayButton.setVisible(true);
+            } else {
+                if (this.hitButton) this.hitButton.setVisible(false);
+                if (this.stayButton) this.stayButton.setVisible(false);
+            }
+        });
+
         this.socket.on('playerUpdate', (data) => {
             console.log(`Player ${data.playerId} updated:`, data);
             
@@ -352,7 +366,6 @@ class MultiplayerScene extends Phaser.Scene {
 
             // If new cards were drawn, add them to the display
             if (data.hand) {
-                // ✅ USE THE POSITION MAPPING instead of trying to calculate it
                 const pos = this.playerPositionMap[data.playerId];
                 
                 if (!pos) {
@@ -389,11 +402,23 @@ class MultiplayerScene extends Phaser.Scene {
             }
         });
 
-        // ✅ IMPROVED: Return to lobby after game instead of main menu
         this.socket.on('gameResults', (data) => {
             this.gameActive = false;
-            this.hitButton.setVisible(false);
-            this.stayButton.setVisible(false);
+            if (this.hitButton) this.hitButton.setVisible(false);
+            if (this.stayButton) this.stayButton.setVisible(false);
+
+            // 🔧 FIX: Reveal dealer's hidden card and any new drawn cards
+            const holeCard = this.gameContainer.getByName('dealerHoleCard');
+            if (holeCard) holeCard.destroy(); // Remove the face-down card
+
+            const dealerCardX = 320;
+            data.dealerHand.forEach((card, idx) => {
+                // Skip index 0 since the upcard is already there
+                if (idx > 0) { 
+                    const sprite = this.add.image(dealerCardX + (idx * 90), 80, 'cardDeck', `card${card.suit}${card.value}.png`).setScale(0.8);
+                    this.gameContainer.add(sprite);
+                }
+            });
 
             // Show results screen
             const resultsBg = this.add.rectangle(400, 300, 800, 600, 0x000000, 0.8);
@@ -463,12 +488,12 @@ class MultiplayerScene extends Phaser.Scene {
             this.socket.off('roomUpdate');
             this.socket.off('roomError');
             this.socket.off('multiGameState');
+            this.socket.off('turnChange'); // 🔧 FIX: Added missing turnChange cleanup
             this.socket.off('playerUpdate');
             this.socket.off('gameResults');
         });
     }
 
-    // ✅ NEW: Return to lobby after a round
     returnToLobby() {
         this.gameActive = false;
 
