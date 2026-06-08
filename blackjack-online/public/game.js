@@ -171,7 +171,7 @@ class SinglePlayerScene extends Phaser.Scene {
 }
 
 // ==========================================
-// 3. MULTIPLAYER SCENE (IMPROVED)
+// 3. MULTIPLAYER SCENE (CORRECTED)
 // ==========================================
 class MultiplayerScene extends Phaser.Scene {
     constructor() { super('MultiplayerScene'); }
@@ -190,6 +190,7 @@ class MultiplayerScene extends Phaser.Scene {
         this.myPlayerId = this.socket.id;
         this.gameActive = false;
         this.playerCardSprites = {}; // Track card sprites by player ID
+        this.playerPositionMap = {}; // ✅ Map player ID to their layout position
         this.gameContainer = null; // Will hold all game scene elements
 
         // UI Text Components
@@ -251,7 +252,7 @@ class MultiplayerScene extends Phaser.Scene {
             dealerLabel.setOrigin(0.5);
             this.gameContainer.add(dealerLabel);
 
-            // Show first dealer card, hide second
+            // Show dealer cards
             const dealerCardX = 320;
             data.dealerHand.forEach((card, idx) => {
                 const sprite = this.add.image(
@@ -272,9 +273,10 @@ class MultiplayerScene extends Phaser.Scene {
                 { x: 680, y: 420, label: 'Player 4' }
             ];
 
-            // Initialize card sprite tracking for each player
+            // Initialize card sprite tracking and position mapping for each player
             data.players.forEach((player, playerIdx) => {
                 this.playerCardSprites[player.id] = [];
+                this.playerPositionMap[player.id] = playerLayout[playerIdx]; // ✅ Store position mapping
                 
                 const pos = playerLayout[playerIdx];
                 const isYou = player.id === this.socket.id ? " (YOU)" : "";
@@ -350,28 +352,19 @@ class MultiplayerScene extends Phaser.Scene {
 
             // If new cards were drawn, add them to the display
             if (data.hand) {
-                const playerLayout = [
-                    { x: 120, y: 220 },
-                    { x: 680, y: 220 },
-                    { x: 120, y: 420 },
-                    { x: 680, y: 420 }
-                ];
-
-                // Find player index to get layout position
-                const playerIdx = Array.from(this.socket.handshake.auth?.players || [])
-                    .findIndex(p => p.id === data.playerId);
+                // ✅ USE THE POSITION MAPPING instead of trying to calculate it
+                const pos = this.playerPositionMap[data.playerId];
                 
-                // Simpler approach: destroy old card sprites and redraw
+                if (!pos) {
+                    console.warn(`No position found for player ${data.playerId}`);
+                    return;
+                }
+
+                // Destroy old card sprites
                 if (this.playerCardSprites[data.playerId]) {
                     this.playerCardSprites[data.playerId].forEach(sprite => sprite.destroy());
                     this.playerCardSprites[data.playerId] = [];
                 }
-
-                // Find position of this player (match by checking all positions)
-                // We'll use a heuristic: count how many unique players we've seen
-                const allPlayerIds = Object.keys(this.playerCardSprites);
-                const playerPosition = allPlayerIds.indexOf(data.playerId);
-                const pos = playerLayout[playerPosition >= 0 ? playerPosition : 0];
 
                 // Draw updated cards with a slight animation
                 data.hand.forEach((card, cardIdx) => {
