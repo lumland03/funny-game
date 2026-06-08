@@ -222,6 +222,142 @@ function setupMultiplayerLogic(socket) {
         });
     });
 
+    // --- PLAYER READY HANDLER ---
+    socket.on('playerReady', () => {
+        if (!currentRoomName || !rooms[currentRoomName]) return;
+        
+        const room = rooms[currentRoomName];
+        
+        // Find the player who sent this event and flip their ready status
+        const player = room.players.find(p => p.id === socket.id);
+        if (player) {
+            player.isReady = !player.isReady; // Toggle true/false
+            console.log(`[Multiplayer] Player ${socket.id} set ready to: ${player.isReady}`);
+        }
+
+        // Check if EVERYONE in the room is now ready
+        // REQUIRE at least 2 players to start
+        const allReady = room.players.length >= 2 && room.players.every(p => p.isReady);
+
+        if (allReady) {
+            // Change room status so no one else can join mid-game
+            room.status = 'playing';
+            room.currentTurn = 0; // Reset turn counter to the first player
+            room.deck = shuffle(createDeck()); // Fresh deck for the round
+            room.dealerHand = [room.deck.pop(), room.deck.pop()];
+
+            // Deal 2 cards to every player in the room
+            room.players.forEach(p => {
+                p.hand = [room.deck.pop(), room.deck.pop()];
+                p.score = calculateScore(p.hand);
+                p.status = 'playing';
+            });
+
+            // Tell everyone the game is starting and send the initial hands!
+            io.to(currentRoomName).emit('multiGameState', {
+                players: room.players,
+                dealerUpCard: room.dealerHand[0],
+                dealerHand: room.dealerHand,
+                currentTurnId: room.players[0].id
+            });
+        } else {
+            // If not everyone is ready, just broadcast the updated room list with the new ready statuses
+            io.to(currentRoomName).emit('roomUpdate', {
+                roomName: currentRoomName,
+                players: room.players,
+                status: room.status
+            });
+        }
+    });
+
+    // --- PLAYER HIT HANDLER ---
+    socket.on('playerHit', () => {
+        if (!currentRoomName || !rooms[currentRoomName]) return;
+        const room = rooms[currentRoomName];
+        const player = room.players.find(p => p.id === socket.id);
+        
+        if (!player || player.status !== 'playing') return;
+        
+        const card = room.deck.pop();
+        player.hand.push(card);
+        player.score = calculateScore(player.hand);
+        
+        if (player.score > 21) {
+            player.status = 'busted';
+        }
+        
+        // Notify the room of the update
+        io.to(currentRoomName).emit('playerUpdate', {
+            playerId: socket.id,
+            hand: player.hand,
+            score: player.score,
+            status: player.status
+        });
+        
+        // Check if all players have finished
+        checkGameEnd(currentRoomName);
+    });
+
+    // --- PLAYER STAY HANDLER ---
+    socket.on('playerStay', () => {
+        if (!currentRoomName || !rooms[currentRoomName]) return;
+        const room = rooms[currentRoomName];
+        const player = room.players.find(p => p.id === socket.id);
+        
+        if (!player) return;
+        player.status = 'stayed';
+        
+        io.to(currentRoomName).emit('playerUpdate', {
+            playerId: socket.id,
+            status: 'stayed'
+        });
+        
+        checkGameEnd(currentRoomName);
+    });
+
+    // --- HELPER: Check if game should end ---
+    function checkGameEnd(roomName) {
+        const room = rooms[roomName];
+        const allFinished = room.players.every(p => p.status === 'stayed' || p.status === 'busted');
+        
+        if (allFinished) {
+            // Dealer plays
+            let dScore = calculateScore(room.dealerHand);
+            while (dScore < 17) {
+                room.dealerHand.push(room.deck.pop());
+                dScore = calculateScore(room.dealerHand);
+            }
+            
+            // Calculate results
+            const results = room.players.map(p => {
+                let result = '';
+                if (p.status === 'busted') {
+                    result = 'Busted!';
+                } else if (dScore > 21) {
+                    result = 'Won!';
+                } else if (p.score > dScore) {
+                    result = 'Won!';
+                } else if (p.score < dScore) {
+                    result = 'Lost!';
+                } else {
+                    result = 'Push!';
+                }
+                return { playerId: p.id, result, dealerScore: dScore };
+            });
+            
+            io.to(roomName).emit('gameResults', {
+                dealerHand: room.dealerHand,
+                results: results
+            });
+
+            // Clean up room after results sent
+            setTimeout(() => {
+                delete rooms[roomName];
+                console.log(`[Multiplayer] Room ${roomName} destroyed after game end`);
+            }, 5000);
+        }
+    }
+
     // Handle sudden disconnects while in a multiplayer room
     socket.on('disconnect', () => {
         if (currentRoomName && rooms[currentRoomName]) {
@@ -241,53 +377,6 @@ function setupMultiplayerLogic(socket) {
                     status: rooms[currentRoomName].status
                 });
             }
-        }
-    });
-
-    // --- PLAYER READY HANDLER ---
-    socket.on('playerReady', () => {
-        if (!currentRoomName || !rooms[currentRoomName]) return;
-        
-        const room = rooms[currentRoomName];
-        
-        // Find the player who sent this event and flip their ready status
-        const player = room.players.find(p => p.id === socket.id);
-        if (player) {
-            player.isReady = !player.isReady; // Toggle true/false
-            console.log(`[Multiplayer] Player ${socket.id} set ready to: ${player.isReady}`);
-        }
-
-        // Check if EVERYONE in the room is now ready
-        // (We also want to make sure there's at least 1 player)
-        const allReady = room.players.length > 0 && room.players.every(p => p.isReady);
-
-        if (allReady) {
-            // Change room status so no one else can join mid-game
-            room.status = 'playing';
-            room.currentTurn = 0; // Reset turn counter to the first player
-            room.deck = shuffle(createDeck()); // Fresh deck for the round
-            room.dealerHand = [room.deck.pop(), room.deck.pop()];
-
-            // Deal 2 cards to every player in the room
-            room.players.forEach(p => {
-                p.hand = p.hand = [room.deck.pop(), room.deck.pop()];
-                p.score = calculateScore(p.hand);
-                p.status = 'playing';
-            });
-
-            // Tell everyone the game is starting and send the initial hands!
-            io.to(currentRoomName).emit('multiGameState', {
-                players: room.players,
-                dealerUpCard: room.dealerHand[0],
-                currentTurnId: room.players[0].id // Player 1 goes first
-            });
-        } else {
-            // If not everyone is ready, just broadcast the updated room list with the new ready statuses
-            io.to(currentRoomName).emit('roomUpdate', {
-                roomName: currentRoomName,
-                players: room.players,
-                status: room.status
-            });
         }
     });
 }
