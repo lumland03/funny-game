@@ -171,7 +171,7 @@ class SinglePlayerScene extends Phaser.Scene {
 }
 
 // ==========================================
-// 3. MULTIPLAYER SCENE
+// 3. MULTIPLAYER SCENE (IMPROVED)
 // ==========================================
 class MultiplayerScene extends Phaser.Scene {
     constructor() { super('MultiplayerScene'); }
@@ -185,12 +185,19 @@ class MultiplayerScene extends Phaser.Scene {
         this.socket = socket;
         this.socket.emit('modeSelection', 'multi');
 
+        // Store game state
+        this.currentRoom = null;
+        this.myPlayerId = this.socket.id;
+        this.gameActive = false;
+        this.playerCardSprites = {}; // Track card sprites by player ID
+        this.gameContainer = null; // Will hold all game scene elements
+
         // UI Text Components
-        this.statusText = this.add.text(400, 100, 'MULTIPLAYER LOBBY', { fontSize: '32px', fill: '#fff' }).setOrigin(0.5);
-        this.lobbyInfoText = this.add.text(400, 240, 'Connecting to multiplayer pool...', { fontSize: '18px', fill: '#aaa', align: 'center' }).setOrigin(0.5);
+        this.statusText = this.add.text(400, 30, 'MULTIPLAYER LOBBY', { fontSize: '32px', fill: '#fff' }).setOrigin(0.5);
+        this.lobbyInfoText = this.add.text(400, 100, 'Connecting to multiplayer pool...', { fontSize: '16px', fill: '#aaa', align: 'center' }).setOrigin(0.5);
 
         // Fixed Ready Button
-        this.readyButton = this.add.text(400, 500, 'TAP TO READY UP', { fontSize: '24px', fill: '#fff', backgroundColor: '#333', padding: 12 })
+        this.readyButton = this.add.text(400, 550, 'TAP TO READY UP', { fontSize: '24px', fill: '#fff', backgroundColor: '#333', padding: 12 })
             .setOrigin(0.5)
             .setInteractive()
             .setVisible(false)
@@ -204,6 +211,7 @@ class MultiplayerScene extends Phaser.Scene {
         this.time.delayedCall(500, () => {
             const roomName = prompt("Enter a Room Name to create or join (e.g., Room1):");
             if (roomName) {
+                this.currentRoom = roomName;
                 this.socket.emit('joinRoom', roomName);
             } else {
                 this.scene.start('MainMenuScene');
@@ -214,7 +222,7 @@ class MultiplayerScene extends Phaser.Scene {
         this.socket.on('roomUpdate', (data) => {
             this.readyButton.setVisible(true); 
 
-            let playerListString = `Room: ${data.roomName}\n\nConnected Players:\n`;
+            let playerListString = `Room: ${data.roomName}\n\nConnected Players (${data.players.length}/4):\n`;
             data.players.forEach((player, index) => {
                 const isMe = player.id === this.socket.id ? " (You)" : "";
                 const readyStatus = player.isReady ? "✅ READY" : "⏳ Waiting...";
@@ -226,52 +234,75 @@ class MultiplayerScene extends Phaser.Scene {
         });
 
         this.socket.on('multiGameState', (data) => {
-            this.statusText.setVisible(false);
+            this.gameActive = true;
+            this.statusText.setText('MULTIPLAYER GAME!');
+            this.statusText.setFill('#0f0');
             this.lobbyInfoText.setVisible(false);
             this.readyButton.setVisible(false);
 
-            // Store for updates
-            this.multiPlayers = data.players;
-            this.myPlayerId = this.socket.id;
-            this.multiGameActive = true;
-
-            this.add.text(400, 50, 'MULTIPLAYER GAME START!', { fontSize: '32px', fill: '#0f0' }).setOrigin(0.5);
+            // Create container for game scene
+            if (this.gameContainer) {
+                this.gameContainer.destroy();
+            }
+            this.gameContainer = this.add.container(0, 0);
 
             // ✅ RENDER DEALER CARDS AT TOP
-            this.add.text(400, 90, 'Dealer', { fontSize: '18px', fill: '#fff' }).setOrigin(0.5);
+            const dealerLabel = this.add.text(400, 20, 'DEALER', { fontSize: '20px', fill: '#ff6b6b', fontStyle: 'bold' });
+            dealerLabel.setOrigin(0.5);
+            this.gameContainer.add(dealerLabel);
+
+            // Show first dealer card, hide second
+            const dealerCardX = 320;
             data.dealerHand.forEach((card, idx) => {
-                this.add.image(
-                    250 + (idx * 80),
-                    130,
+                const sprite = this.add.image(
+                    dealerCardX + (idx * 90),
+                    80,
                     'cardDeck',
                     `card${card.suit}${card.value}.png`
-                ).setScale(0.7);
+                ).setScale(0.8);
+                this.gameContainer.add(sprite);
             });
 
-            // ✅ RENDER EACH PLAYER'S CARDS
-            const playerPositions = [
-                { x: 150, y: 280, label: 'Player 1' },
-                { x: 500, y: 280, label: 'Player 2' },
-                { x: 150, y: 450, label: 'Player 3' },
-                { x: 500, y: 450, label: 'Player 4' }
+            // ✅ IMPROVED LAYOUT: Better spacing to prevent overlap
+            // 2 players side-by-side on top, 2 on bottom
+            const playerLayout = [
+                { x: 120, y: 220, label: 'Player 1' },
+                { x: 680, y: 220, label: 'Player 2' },
+                { x: 120, y: 420, label: 'Player 3' },
+                { x: 680, y: 420, label: 'Player 4' }
             ];
 
+            // Initialize card sprite tracking for each player
             data.players.forEach((player, playerIdx) => {
-                const pos = playerPositions[playerIdx];
+                this.playerCardSprites[player.id] = [];
+                
+                const pos = playerLayout[playerIdx];
                 const isYou = player.id === this.socket.id ? " (YOU)" : "";
+                const playerColor = player.id === this.socket.id ? '#00ff00' : '#aaaaaa';
                 
-                this.add.text(pos.x, pos.y - 30, pos.label + isYou, { fontSize: '16px', fill: '#aaa' }).setOrigin(0.5);
+                // Player label
+                const label = this.add.text(pos.x, pos.y - 40, pos.label + isYou, { fontSize: '14px', fill: playerColor, fontStyle: 'bold' });
+                label.setOrigin(0.5);
+                this.gameContainer.add(label);
                 
+                // Draw initial cards
                 player.hand.forEach((card, cardIdx) => {
-                    this.add.image(
-                        pos.x + (cardIdx * 50),
+                    const cardSprite = this.add.image(
+                        pos.x + (cardIdx * 60),
                         pos.y,
                         'cardDeck',
                         `card${card.suit}${card.value}.png`
-                    ).setScale(0.65);
+                    ).setScale(0.7);
+                    this.gameContainer.add(cardSprite);
+                    this.playerCardSprites[player.id].push(cardSprite);
                 });
 
-                this.add.text(pos.x, pos.y + 60, `Score: ${player.score}`, { fontSize: '14px', fill: '#fff' }).setOrigin(0.5);
+                // Player score
+                const scoreText = this.add.text(pos.x, pos.y + 80, `Score: ${player.score}`, 
+                    { fontSize: '16px', fill: '#fff', fontStyle: 'bold' });
+                scoreText.setOrigin(0.5);
+                scoreText.setName(`score_${player.id}`); // Tag for easy updates
+                this.gameContainer.add(scoreText);
             });
 
             // ✅ ADD HIT/STAY BUTTONS FOR CURRENT PLAYER
@@ -286,53 +317,145 @@ class MultiplayerScene extends Phaser.Scene {
                 .setDepth(10);
 
             this.hitButton.on('pointerdown', () => {
-                if (this.multiGameActive) {
+                if (this.gameActive) {
                     this.socket.emit('playerHit');
                 }
             });
 
             this.stayButton.on('pointerdown', () => {
-                if (this.multiGameActive) {
+                if (this.gameActive) {
                     this.socket.emit('playerStay');
                     this.hitButton.setVisible(false);
                     this.stayButton.setVisible(false);
                 }
             });
+
+            console.log("Multiplayer Match Initialized:", data);
         });
 
-        // ✅ HANDLE PLAYER UPDATES (cards/score changes)
+        // ✅ IMPROVED: Handle player updates with animated card drawing
         this.socket.on('playerUpdate', (data) => {
             console.log(`Player ${data.playerId} updated:`, data);
-            // Update local player state
-            const player = this.multiPlayers.find(p => p.id === data.playerId);
-            if (player) {
-                player.hand = data.hand || player.hand;
-                player.score = data.score !== undefined ? data.score : player.score;
-                player.status = data.status || player.status;
-            }
             
-            // Optionally rebuild the display (for now just log)
-            // In a full implementation, you'd animate new cards or update scores
+            // Update score text
+            const scoreText = this.gameContainer.getByName(`score_${data.playerId}`);
+            if (scoreText && data.score !== undefined) {
+                scoreText.setText(`Score: ${data.score}`);
+                
+                // Flash the score if it's a bust
+                if (data.status === 'busted') {
+                    scoreText.setFill('#ff0000');
+                }
+            }
+
+            // If new cards were drawn, add them to the display
+            if (data.hand) {
+                const playerLayout = [
+                    { x: 120, y: 220 },
+                    { x: 680, y: 220 },
+                    { x: 120, y: 420 },
+                    { x: 680, y: 420 }
+                ];
+
+                // Find player index to get layout position
+                const playerIdx = Array.from(this.socket.handshake.auth?.players || [])
+                    .findIndex(p => p.id === data.playerId);
+                
+                // Simpler approach: destroy old card sprites and redraw
+                if (this.playerCardSprites[data.playerId]) {
+                    this.playerCardSprites[data.playerId].forEach(sprite => sprite.destroy());
+                    this.playerCardSprites[data.playerId] = [];
+                }
+
+                // Find position of this player (match by checking all positions)
+                // We'll use a heuristic: count how many unique players we've seen
+                const allPlayerIds = Object.keys(this.playerCardSprites);
+                const playerPosition = allPlayerIds.indexOf(data.playerId);
+                const pos = playerLayout[playerPosition >= 0 ? playerPosition : 0];
+
+                // Draw updated cards with a slight animation
+                data.hand.forEach((card, cardIdx) => {
+                    const cardSprite = this.add.image(
+                        pos.x + (cardIdx * 60),
+                        pos.y,
+                        'cardDeck',
+                        `card${card.suit}${card.value}.png`
+                    ).setScale(0.7);
+                    
+                    // Animate new card appearing
+                    this.tweens.add({
+                        targets: cardSprite,
+                        scale: { from: 0.3, to: 0.7 },
+                        duration: 300,
+                        ease: 'Back.out'
+                    });
+
+                    this.gameContainer.add(cardSprite);
+                    this.playerCardSprites[data.playerId].push(cardSprite);
+                });
+            }
         });
 
-        // ✅ HANDLE GAME RESULTS
+        // ✅ IMPROVED: Return to lobby after game instead of main menu
         this.socket.on('gameResults', (data) => {
-            this.multiGameActive = false;
+            this.gameActive = false;
             this.hitButton.setVisible(false);
             this.stayButton.setVisible(false);
 
-            this.add.text(400, 250, 'ROUND OVER', { fontSize: '40px', fill: '#ff0' }).setOrigin(0.5);
+            // Show results screen
+            const resultsBg = this.add.rectangle(400, 300, 800, 600, 0x000000, 0.8);
+            resultsBg.setDepth(100);
+
+            const resultsTitle = this.add.text(400, 100, 'ROUND OVER!', { fontSize: '48px', fill: '#ffff00', fontStyle: 'bold' });
+            resultsTitle.setOrigin(0.5).setDepth(101);
             
             const dealerCardsStr = data.dealerHand.map(c => `${c.value}${c.suit[0]}`).join(', ');
-            let resultsStr = `Dealer: ${dealerCardsStr}\n\n`;
+            let resultsStr = `DEALER: ${dealerCardsStr}\n\n`;
             
             data.results.forEach((result, idx) => {
-                resultsStr += `Player ${idx + 1}: ${result.result}\n`;
+                const status = result.result === 'Won!' ? '✅' : result.result === 'Push!' ? '➖' : '❌';
+                resultsStr += `Player ${idx + 1}: ${status} ${result.result}\n`;
             });
 
-            this.add.text(400, 350, resultsStr, { fontSize: '18px', fill: '#fff', align: 'center' }).setOrigin(0.5);
+            const resultsText = this.add.text(400, 250, resultsStr, { 
+                fontSize: '18px', 
+                fill: '#fff', 
+                align: 'center',
+                lineSpacing: 10
+            });
+            resultsText.setOrigin(0.5).setDepth(101);
 
-            this.time.delayedCall(3000, () => {
+            // Play Again Button
+            const playAgainBtn = this.add.text(400, 480, 'READY FOR NEXT ROUND?', { 
+                fontSize: '20px', 
+                fill: '#fff', 
+                backgroundColor: '#0f0', 
+                padding: 15,
+                align: 'center'
+            }).setOrigin(0.5).setInteractive().setDepth(101);
+
+            playAgainBtn.on('pointerdown', () => {
+                // Destroy results screen
+                resultsBg.destroy();
+                resultsTitle.destroy();
+                resultsText.destroy();
+                playAgainBtn.destroy();
+
+                // Return to lobby
+                this.returnToLobby();
+            });
+
+            // Back to Menu Button
+            const menuBtn = this.add.text(400, 530, 'BACK TO MENU', { 
+                fontSize: '16px', 
+                fill: '#aaa', 
+                backgroundColor: '#333', 
+                padding: 10,
+                align: 'center'
+            }).setOrigin(0.5).setInteractive().setDepth(101);
+
+            menuBtn.on('pointerdown', () => {
+                this.socket.emit('leaveRoom');
                 this.scene.start('MainMenuScene');
             });
         });
@@ -351,19 +474,27 @@ class MultiplayerScene extends Phaser.Scene {
             this.socket.off('gameResults');
         });
     }
+
+    // ✅ NEW: Return to lobby after a round
+    returnToLobby() {
+        this.gameActive = false;
+
+        // Destroy game container
+        if (this.gameContainer) {
+            this.gameContainer.destroy();
+        }
+
+        // Hide game buttons
+        if (this.hitButton) this.hitButton.setVisible(false);
+        if (this.stayButton) this.stayButton.setVisible(false);
+
+        // Reset state
+        this.statusText.setText('MULTIPLAYER LOBBY');
+        this.statusText.setFill('#fff');
+        this.lobbyInfoText.setVisible(true);
+        this.readyButton.setVisible(true);
+
+        // Request updated room state from server
+        this.socket.emit('getRoomStatus', this.currentRoom);
+    }
 }
-
-// ==========================================
-// 4. CORE CONFIGURATION
-// ==========================================
-const config = {
-    type: Phaser.AUTO,
-    parent: 'game-container',
-    width: 800,
-    height: 600,
-    backgroundColor: '#2d2d2d',
-    render: { pixelArt: true, antialias: false },
-    scene: [MainMenuScene, SinglePlayerScene, MultiplayerScene] 
-};
-
-const game = new Phaser.Game(config);
