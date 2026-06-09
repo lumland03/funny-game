@@ -275,11 +275,11 @@ class MultiplayerScene extends Phaser.Scene {
             dealerLabel.setOrigin(0.5);
             this.gameContainer.add(dealerLabel);
 
-            const dealerCardX = 500;
+            const dealerCardX = 550;
             // Show Up Card
-            const upCardSprite = this.add.image(dealerCardX, 100, 'cardDeck', `card${data.dealerUpCard.suit}${data.dealerUpCard.value}.png`).setOrigin(0.5).setScale(0.8);
+            const upCardSprite = this.add.image(dealerCardX, 200, 'cardDeck', `card${data.dealerUpCard.suit}${data.dealerUpCard.value}.png`).setOrigin(0.5).setScale(0.8);
             // Show Hole Card (Face Down)
-            const holeCardSprite = this.add.image(dealerCardX + 100, 100, 'cardBacks', 'cardBack_red2.png').setOrigin(0.5).setScale(0.8);
+            const holeCardSprite = this.add.image(dealerCardX + 100, 200, 'cardBacks', 'cardBack_red2.png').setOrigin(0.5).setScale(0.8);
             holeCardSprite.setName('dealerHoleCard');
 
             this.gameContainer.add([upCardSprite, holeCardSprite]);
