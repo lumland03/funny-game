@@ -543,8 +543,8 @@ class MultiplayerScene extends Phaser.Scene {
 const config = {
     type: Phaser.AUTO,
     parent: 'game-container',
-    width: 800,
-    height: 600,
+    width: 1200,
+    height: 800,
     backgroundColor: '#2d2d2d',
     render: { pixelArt: true, antialias: false },
     scene: [MainMenuScene, SinglePlayerScene, MultiplayerScene] 
