@@ -3,8 +3,12 @@ const app = express();
 const http = require('http').createServer(app);
 const io = require('socket.io')(http, {
     cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
+        origin: function(origin, callback) {
+            // Allow all origins (including localhost and Codespaces domains)
+            callback(null, true);
+        },
+        methods: ["GET", "POST"],
+        credentials: true
     }
 });
 const rooms = {}; 
@@ -462,6 +466,6 @@ function setupMultiplayerLogic(socket) {
 }
 
 const PORT = process.env.PORT || 3000;
-http.listen(PORT, () => {
-    console.log(`Server is live at http://localhost:${PORT}`);
+http.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server is live at http://0.0.0.0:${PORT}`);
 });

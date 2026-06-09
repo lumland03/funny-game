@@ -1,7 +1,12 @@
 // ==========================================
 // 0. GLOBAL NETWORK INITIALIZATION
 // ==========================================
-const socket = io();
+const socket = io({
+    reconnection: true,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000,
+    reconnectionAttempts: 5
+});
 
 // ==========================================
 // 1. MAIN MENU SCENE
