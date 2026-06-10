@@ -11,7 +11,7 @@
 
   <!-- ── NAVIGATION ─────────────────────── -->
   <nav class="nav" id="nav" aria-label="Site navigation">
-    <span class="nav-brand">♠ Landon Umland</span>
+    <a href="#hero" class="nav-brand">♠ Landon Umland</a>
     <ul class="nav-links" role="list">
       <li><a href="#research"   class="nav-link">Research</a></li>
       <li><a href="#process"    class="nav-link">Process</a></li>
@@ -457,8 +457,8 @@
           </div>
           <figure class="product-screenshot">
             <img
-              src="images/game-screenshot.png"
-              alt="The blackjack game showing card sprites on a dark background with a DEAL AGAIN prompt"
+              src="images/multiplayer-screenshot.png"
+              alt="Multiplayer blackjack in progress — green felt table, two players' hands visible, dealer with one hidden card, Your Turn indicator, HIT and STAY buttons active"
               loading="lazy"
             >
           </figure>
@@ -613,52 +613,28 @@
           </div>
 
           <div class="reflection-para">
-            <h3>What AI Actually Is — and What's Next</h3>
+            <h3>What AI Actually Is — and What I'd Do Differently</h3>
             <p>
               I started thinking AI would be objective: cross-verifying models would guarantee correct output.
               I learned that AI tools are helpful but imperfect. Neither Claude nor Gemini is neutral.
               Both make mistakes. The best workflow I found was iterative: report a specific problem,
-              AI fixes it, test it, report the next problem. Long-term, I want to go back to this codebase
-              and actually understand it — not immediately, but eventually.
-              This project gave me a clear map of what I need to learn next:
+              AI fixes it, test it, report the next problem. If I did this again, I'd do four things
+              differently. First, I'd buy a model subscription from the start — running out of credits
+              three times mid-development forced the worst kind of context switching.
+              Second, I'd set a hard deadline for the learning phase before switching into shipping mode,
+              instead of letting time pressure collapse them together.
+              Third, I'd document every prompt and AI response as I went — I have almost no record of
+              what I actually asked or got back, which makes this process hard to reflect on clearly.
+              Fourth, I'd test earlier: catching the listener-stacking bug in Week 6 instead of Week 9
+              would have saved several sessions of confusion.
+              Long-term, I want to go back to this codebase and understand it —
               JavaScript deeply, Socket.IO specifically, and real-time state management across environments.
-              That's a more useful outcome than I expected.
+              This project gave me a clear map of exactly what I need to learn next.
             </p>
           </div>
 
         </div>
 
-        <!-- Workspace Links -->
-        <h3 class="subsection-title">Workspaces &amp; Links</h3>
-        <div class="links-row">
-
-          <a href="https://blackjack-online-2zlx.onrender.com" target="_blank" rel="noopener" class="workspace-link workspace-link--primary">
-            <span class="link-icon" aria-hidden="true">▶</span>
-            <span class="link-text">
-              <strong>Play the Game</strong>
-              <small>blackjack-online-2zlx.onrender.com</small>
-            </span>
-          </a>
-
-          <!-- Replace [YOUR-GITHUB-URL] with your actual GitHub repo URL -->
-          <span class="workspace-link workspace-link--placeholder" title="Add your GitHub repo URL to the HTML">
-            <span class="link-icon" aria-hidden="true">⌥</span>
-            <span class="link-text">
-              <strong>GitHub Repository</strong>
-              <small>[ Add your repo URL in index.html ]</small>
-            </span>
-          </span>
-
-          <!-- Replace [YOUR-MILANOTE-URL] with your actual Milanote board URL -->
-          <span class="workspace-link workspace-link--placeholder" title="Add your Milanote board URL to the HTML">
-            <span class="link-icon" aria-hidden="true">◈</span>
-            <span class="link-text">
-              <strong>Milanote Board</strong>
-              <small>[ Add your Milanote URL in index.html ]</small>
-            </span>
-          </span>
-
-        </div>
 
       </div>
     </section>
@@ -671,6 +647,10 @@
     <div class="container footer-inner">
       <p class="footer-name">Landon Umland</p>
       <p class="footer-course">AI + Design &nbsp;·&nbsp; EWU &nbsp;·&nbsp; Spring 2026</p>
+      <nav class="footer-links" aria-label="Project links">
+        <a href="https://github.com/lumland03/funny-game" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://app.milanote.com/1WjWCF1qUsSc25?p=IeOjXtB9Ebm" target="_blank" rel="noopener">Milanote</a>
+      </nav>
       <p class="footer-suits" aria-hidden="true">♠ ♥ ♦ ♣</p>
     </div>
   </footer>
@@ -678,7 +658,8 @@
 
   <!-- Highlight active nav link based on scroll position -->
   <script>
-    const sections = document.querySelectorAll('section[id]');
+    // Only watch the four sections that have nav links (not the hero)
+    const sections = document.querySelectorAll('#research, #process, #product, #reflection');
     const navLinks = document.querySelectorAll('.nav-link');
 
     const observer = new IntersectionObserver(
