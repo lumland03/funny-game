@@ -12,6 +12,11 @@
   <!-- ── NAVIGATION ─────────────────────── -->
   <nav class="nav" id="nav" aria-label="Site navigation">
     <a href="#hero" class="nav-brand">♠ Landon Umland</a>
+    <button class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">
+      <span></span>
+      <span></span>
+      <span></span>
+    </button>
     <ul class="nav-links" role="list">
       <li><a href="#research"   class="nav-link">Research</a></li>
       <li><a href="#process"    class="nav-link">Process</a></li>
@@ -656,9 +661,9 @@
   </footer>
 
 
-  <!-- Highlight active nav link based on scroll position -->
+  <!-- Nav: scroll highlight + hamburger toggle -->
   <script>
-    // Only watch the four sections that have nav links (not the hero)
+    // Highlight active nav link based on scroll position
     const sections = document.querySelectorAll('#research, #process, #product, #reflection');
     const navLinks = document.querySelectorAll('.nav-link');
 
@@ -679,6 +684,23 @@
     );
 
     sections.forEach((section) => observer.observe(section));
+
+    // Hamburger menu toggle
+    const navToggle = document.querySelector('.nav-toggle');
+    const navLinksList = document.querySelector('.nav-links');
+
+    navToggle.addEventListener('click', () => {
+      const isOpen = navLinksList.classList.toggle('is-open');
+      navToggle.setAttribute('aria-expanded', isOpen);
+    });
+
+    // Close menu when any nav link is tapped
+    navLinks.forEach((link) => {
+      link.addEventListener('click', () => {
+        navLinksList.classList.remove('is-open');
+        navToggle.setAttribute('aria-expanded', 'false');
+      });
+    });
   </script>
 
 </body>
